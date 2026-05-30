@@ -1,0 +1,47 @@
+# Build stage
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache python3 make g++ \
+    && npm install -g npm@latest
+
+# Copy package files
+COPY backend/package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production && \
+    npm cache clean --force
+
+# Production stage
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apk add --no-cache dumb-init
+
+# Copy node_modules from builder
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy application code
+COPY backend/src ./src
+COPY backend/package*.json ./
+COPY backend/tsconfig.json ./
+
+# Create logs directory
+RUN mkdir -p ./logs
+
+# Expose port
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 \
+  CMD wget --quiet --tries=1 --spider http://localhost:5000/health || exit 1
+
+# Use dumb-init to handle signals
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
+# Start application
+CMD ["node", "--require", "ts-node/register", "src/server.ts"]
